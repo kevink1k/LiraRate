@@ -5,8 +5,10 @@ from datetime import datetime
 import pyodbc as odbc
 from operator import itemgetter
 import pandas as pd
-import urllib
 from sqlalchemy import create_engine
+import urllib
+import smtplib , ssl
+#SQL Information
 Driver = "ODBC Driver 17 for SQL Server"
 Server_name = 'LAPTOP-36NUUO53\SQLEXPRESS'
 Database_name = 'test'
@@ -18,13 +20,56 @@ currency = 'LBP'
 _ver = date_time
 base_url = "https://lirarate.org/wp-json/lirarate/v2/rates"
 url = f'{base_url}?currency={currency}&_ver=t{_ver}'
+#Declaring Previous buyrate for comparison
+PrevBuyRate = None
 
-#API CALL
+#EMAIL SENDER
+def SendMail(v,w):
+    print(f'Rate Has {w} by {v}')
+    quoted = urllib.parse.quote_plus(f'''
+                                  Driver={{{Driver}}};
+                                  Server={Server_name};
+                                  Database={Database_name};
+                                  Trusted_connection=yes;
+                                  ''')
+    engine = create_engine(f'mssql+pyodbc:///?odbc_connect={quoted}')
+    query = ("SELECT * from Email_table")
+    data = pd.read_sql(query, engine)
+    RowsCount = len(data)
+    for i in range(RowsCount):
+        print(data.iloc[i][0])
+        mail = data.iloc[i][0]
+        server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+        server.login("kevinelkik3@gmail.com", "ovlgwvajuyfzkdxe")
+        server.sendmail("kevinelkik3@gmail.com",
+                        f'"{mail}"',
+                        f'"Lira Price Rate has {w} by {v}"'
+                        )
+        server.quit()
+
+#API BYT RATE CAll
 def LiraRateApiCallPrice():
+    global PrevBuyRate
     R = requests.get(url)
     data = R.json()['buy'][0:]
+    LastBuyRate = R.json()['buy'][-1][1]
     buyRate = list(map(itemgetter(1), data))
+    if PrevBuyRate == None:
+        PrevBuyRate = LastBuyRate
+    if PrevBuyRate != None and abs(int(PrevBuyRate) - int(LastBuyRate)) >= 200:
+        if PrevBuyRate > LastBuyRate:
+            v = PrevBuyRate - LastBuyRate
+            w = "gone down"
+            SendMail(v,w)
+        else:
+            v1 = LastBuyRate - PrevBuyRate
+            w1 = "gone up"
+            SendMail(v1,w1)
+
+    PrevBuyRate = LastBuyRate
     return(buyRate)
+
+#API DATE CALL
 def LiraRateApiCallDate():
     R = requests.get(url)
     data = R.json()['buy'][0:]
@@ -32,33 +77,31 @@ def LiraRateApiCallDate():
     timelist =[]
     for i in timestamp:
         i = i/1000
-        format_date = '%d/%m/%y'
+        format_date = '%d/%m/%Y'
         date = datetime.fromtimestamp(i)
         timelist.append(date.strftime(format_date))
 
     return (timelist)
 
-Data_Rate = LiraRateApiCallPrice()
-Data_Date = LiraRateApiCallDate()
-df = pd.DataFrame()
-df['Date'] = Data_Date
-df['Buy Price'] = Data_Rate
-print(df)
-
-
-
-def SQL_Add():
+#PUTS DATA INTO SQL
+def InstertData():
+    Data_Rate = LiraRateApiCallPrice()
+    Data_Date = LiraRateApiCallDate()
+    df = pd.DataFrame()
+    df['Date'] = Data_Date
+    df['BuyPrice'] = Data_Rate
     quoted = urllib.parse.quote_plus(f'''
-                        Driver={{{Driver}}};
-                        Server={Server_name};
-                        Database={Database_name};
-                        Trusted_connection=yes;
-                        ''')
-    engine= create_engine(f'mssql+pyodbc:///?odbc_connect={quoted}')
-    df.to_sql('Data_table', con=engine ,if_exists='replace')
+                              Driver={{{Driver}}};
+                              Server={Server_name};
+                              Database={Database_name};
+                              Trusted_connection=yes;
+                              ''')
+    engine = create_engine(f'mssql+pyodbc:///?odbc_connect={quoted}')
+    df.to_sql('Data_table', con=engine, if_exists='replace')
+    print(df)
+    return(df)
+
 #Repeating every 30 minutes
-schedule.every(10).seconds.do(LiraRateApiCallPrice)
-schedule.every(10).seconds.do(LiraRateApiCallDate)
-schedule.every(2).seconds.do(SQL_Add)
+schedule.every(3).seconds.do(InstertData)
 while 1:
     schedule.run_pending()

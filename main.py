@@ -7,6 +7,7 @@ from operator import itemgetter
 import pandas as pd
 from sqlalchemy import create_engine
 import urllib
+import smtplib , ssl
 #SQL Information
 Driver = "ODBC Driver 17 for SQL Server"
 Server_name = 'LAPTOP-36NUUO53\SQLEXPRESS'
@@ -19,13 +20,42 @@ currency = 'LBP'
 _ver = date_time
 base_url = "https://lirarate.org/wp-json/lirarate/v2/rates"
 url = f'{base_url}?currency={currency}&_ver=t{_ver}'
+#Declaring Previous buyrate for comparison
+PrevBuyRate = None
 
-#API CALL
+#EMAIL SENDER
+def SendMail(v,w):
+    print(f'Rate Has {w} by {v}')
+    server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+    server.login("kevinelkik3@gmail.com", "ovlgwvajuyfzkdxe")
+    server.sendmail("kevinelkik3@gmail.com",
+                    "kevinelkik2@gmail.com",
+                    f'"Lira Price Rate has {w} by {v}"')
+    server.quit()
+
+#API BYT RATE CAll
 def LiraRateApiCallPrice():
+    global PrevBuyRate
     R = requests.get(url)
     data = R.json()['buy'][0:]
+    LastBuyRate = R.json()['buy'][-1][1]
     buyRate = list(map(itemgetter(1), data))
+    if PrevBuyRate == None:
+        PrevBuyRate = LastBuyRate
+    if PrevBuyRate != None and abs(int(PrevBuyRate) - int(LastBuyRate)) >= 200:
+        if PrevBuyRate > LastBuyRate:
+            v = PrevBuyRate - LastBuyRate
+            w = "gone down"
+            SendMail(v,w)
+        else:
+            v1 = LastBuyRate - PrevBuyRate
+            w1 = "gone up"
+            SendMail(v1,w1)
+
+    PrevBuyRate = LastBuyRate
     return(buyRate)
+
+#API DATE CALL
 def LiraRateApiCallDate():
     R = requests.get(url)
     data = R.json()['buy'][0:]
@@ -38,7 +68,9 @@ def LiraRateApiCallDate():
         timelist.append(date.strftime(format_date))
 
     return (timelist)
-def Get_data():
+
+#PUTS DATA INTO SQL
+def InstertData():
     Data_Rate = LiraRateApiCallPrice()
     Data_Date = LiraRateApiCallDate()
     df = pd.DataFrame()
@@ -56,6 +88,6 @@ def Get_data():
     return(df)
 
 #Repeating every 30 minutes
-schedule.every(3).seconds.do(Get_data)
+schedule.every(3).seconds.do(InstertData())
 while 1:
     schedule.run_pending()
